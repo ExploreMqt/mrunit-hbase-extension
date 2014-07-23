@@ -86,32 +86,57 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 		}
 		int i= 0;
 		for(Pair<OutputKey, List<ExpectedValue>> expected : expectedResults){
-			String expectedKey = expected.getFirst().toString();
-			if (expected.getFirst() instanceof ImmutableBytesWritable)
-				expectedKey = Bytes.toString(((ImmutableBytesWritable)expected.getFirst()).get());
+			if (i == actuals.size())
+				break;
 			final Pair<OutputKey, Writable> actual = actuals.get(i++);
-			String actualKey = actual.getFirst().toString();
-			if (actual.getFirst() instanceof ImmutableBytesWritable)
-				actualKey = Bytes.toString(((ImmutableBytesWritable)actual.getFirst()).get());
-			if(!expectedKey.endsWith(actualKey))
-				errors.record("Mapper key does not match expected result.  "
-						+ "Expected '%s' got '%s'", expectedKey, actualKey);
-			
-			Put writable = (Put)actual.getSecond();
-			//KeyValue writable = (KeyValue)actual.getSecond();
-			for(ExpectedValue expectedColumn : expected.getSecond()){
-				try
-				{
-				String actualValue = Bytes.toString(writable.get(expectedColumn.getColumnFamily(), expectedColumn.getQualifier()).get(0).getValue());
-				//String actualValue = Bytes.toString(writable.getValue());
-				if (!expectedColumn.getExpected().equals(actualValue))
-					errors.record("Maper value does not match expected result.  Expected '%s' got '%s'", expectedColumn.getExpected(), actualValue);
-				}
-				catch (IndexOutOfBoundsException e){
-					errors.record("Could not find a column for %s:%s", new String(expectedColumn.getColumnFamily()), new String(expectedColumn.getQualifier()));
-				}
-			}
+			compareKeys(errors, expected, actual);
+			compareValues(errors, expected, actual);
 		}
 		errors.assertNone();
+	}
+
+	private void compareValues(final Errors errors,
+			Pair<OutputKey, List<ExpectedValue>> expected,
+			final Pair<OutputKey, Writable> actual) {
+		Put writable = (Put)actual.getSecond();
+		for(ExpectedValue expectedColumn : expected.getSecond()){
+			try
+			{
+				String actualValue = getActualValue(writable, expectedColumn);
+				if (!expectedColumn.getExpected().equals(actualValue))
+					errors.record("Mapper value does not match expected result.  Expected '%s' got '%s'", expectedColumn.getExpected(), actualValue);
+			}
+			catch (IndexOutOfBoundsException e){
+				errors.record("Could not find a column for %s:%s", new String(expectedColumn.getColumnFamily()), new String(expectedColumn.getQualifier()));
+			}
+		}
+	}
+
+	private String getActualValue(Put writable, ExpectedValue expectedColumn) {
+		return Bytes.toString(writable.get(expectedColumn.getColumnFamily(), expectedColumn.getQualifier()).get(0).getValue());
+	}
+
+	private void compareKeys(final Errors errors,
+			Pair<OutputKey, List<ExpectedValue>> expected,
+			final Pair<OutputKey, Writable> actual) {
+		String expectedKey = getExpectedKey(expected);
+		String actualKey = getActualKey(actual);
+		if(!expectedKey.endsWith(actualKey))
+			errors.record("Mapper key does not match expected result.  "
+					+ "Expected '%s' got '%s'", expectedKey, actualKey);
+	}
+
+	private String getActualKey(final Pair<OutputKey, Writable> actual) {
+		String actualKey = actual.getFirst().toString();
+		if (actual.getFirst() instanceof ImmutableBytesWritable)
+			actualKey = Bytes.toString(((ImmutableBytesWritable)actual.getFirst()).get());
+		return actualKey;
+	}
+
+	private String getExpectedKey(Pair<OutputKey, List<ExpectedValue>> expected) {
+		String expectedKey = expected.getFirst().toString();
+		if (expected.getFirst() instanceof ImmutableBytesWritable)
+			expectedKey = Bytes.toString(((ImmutableBytesWritable)expected.getFirst()).get());
+		return expectedKey;
 	}
 }
