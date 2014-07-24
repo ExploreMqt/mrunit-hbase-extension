@@ -81,9 +81,7 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 	
 	private void validate(final List<Pair<OutputKey, List<ExpectedValue>>> expectedResults, final List<Pair<OutputKey, Writable>> actuals){
 		final Errors errors = new Errors(LOG);
-		if(expectedResults.size() != actuals.size()) {
-			 errors.record("Mismatch in output size.  Expected %s got %s", expectedResults.size(), actuals.size());
-		}
+		compareRecordCounts(errors, expectedResults, actuals);
 		int i= 0;
 		for(Pair<OutputKey, List<ExpectedValue>> expected : expectedResults){
 			if (i == actuals.size())
@@ -93,6 +91,15 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 			compareValues(errors, expected, actual);
 		}
 		errors.assertNone();
+	}
+
+	private void compareRecordCounts(
+			final Errors errors,
+			final List<Pair<OutputKey, List<ExpectedValue>>> expectedResults,
+			final List<Pair<OutputKey, Writable>> actuals) {
+		if(expectedResults.size() != actuals.size()) {
+			 errors.record("Mismatch in output size.  Expected %s got %s", expectedResults.size(), actuals.size());
+		}
 	}
 
 	private void compareValues(final Errors errors,

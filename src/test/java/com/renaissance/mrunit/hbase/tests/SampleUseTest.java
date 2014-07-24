@@ -51,7 +51,7 @@ public class SampleUseTest {
 	}
 	
 	@Test
-	public void twoHaikus_splitAndAddedToHbase() throws IOException {
+	public void oneHaiku_splitAndAddedToHbase() throws IOException {
 		HBaseExpectedColumn oldPond = new HBaseExpectedColumn(TITLE_COLUMNFAMILY, "old pond");
 		driver.withInput(new LongWritable(0L), new Text("Basho\nold pond\nold pond...\na frog leaps in\nwater's sound"))
 				.withOutput(new ImmutableBytesWritable(Bytes.toBytes("Basho")), oldPond.Value(new Text("old pond...\na frog leaps in\nwater's sound")))
