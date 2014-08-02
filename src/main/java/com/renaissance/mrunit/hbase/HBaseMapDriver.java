@@ -26,10 +26,12 @@ package com.renaissance.mrunit.hbase;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -48,7 +50,7 @@ import com.renaissance.mrunit.hbase.HBaseExpectedColumn.ExpectedValue;
 public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 	public static final Log LOG = LogFactory.getLog(HBaseMapDriver.class);
 	MapDriver<InputKey, InputValue, OutputKey, Writable> driver;
-	List<Pair<OutputKey, List<ExpectedValue>>> expectedResults = new ArrayList<Pair<OutputKey, List<ExpectedValue>>>();
+	List<Pair<OutputKey, List<ExpectedValue>>> expectedOutputs = new ArrayList<Pair<OutputKey, List<ExpectedValue>>>();
 	
 	public HBaseMapDriver(MapDriver<InputKey, InputValue, OutputKey, Writable> adapted){
 		driver = adapted;
@@ -67,7 +69,7 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 	}
 	
 	public HBaseMapDriver<InputKey, InputValue, OutputKey> withOutput(OutputKey key, ExpectedValue... values){
-		expectedResults.add(new Pair<OutputKey, List<ExpectedValue>>(key, Arrays.asList(values)));
+		expectedOutputs.add(new Pair<OutputKey, List<ExpectedValue>>(key, Arrays.asList(values)));
 		return this;
 	}
 	
@@ -76,30 +78,148 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 	}
 
 	public void runTest() throws IOException{
-		validate(expectedResults, driver.run());
+		validate(expectedOutputs, driver.run());
 	}
 	
-	private void validate(final List<Pair<OutputKey, List<ExpectedValue>>> expectedResults, final List<Pair<OutputKey, Writable>> actuals){
+	public void validate(final List<Pair<OutputKey, Writable>> outputs){
+		validate(expectedOutputs, outputs);
+	}
+	
+	private void validate(final List<Pair<OutputKey, List<ExpectedValue>>> expectedOutputs, final List<Pair<OutputKey, Writable>> outputs){
 		final Errors errors = new Errors(LOG);
-		compareRecordCounts(errors, expectedResults, actuals);
-		int i= 0;
-		for(Pair<OutputKey, List<ExpectedValue>> expected : expectedResults){
-			if (i == actuals.size())
-				break;
-			final Pair<OutputKey, Writable> actual = actuals.get(i++);
-			compareKeys(errors, expected, actual);
-			compareValues(errors, expected, actual);
-		}
+		compareRecordCounts(errors, expectedOutputs, outputs);
+		checkForExpected(errors, expectedOutputs, outputs);
+		checkForUnexpected(errors, expectedOutputs, outputs);
+//		int i= 0;
+//		for(Pair<OutputKey, List<ExpectedValue>> expected : expectedOutputs){
+//			if (i == outputs.size())
+//				break;
+//			final Pair<OutputKey, Writable> actual = outputs.get(i++);
+//			compareKeys(errors, expected, actual);
+//			compareValues(errors, expected, actual);
+//		}
 		errors.assertNone();
+	}
+	
+	private void checkForExpected(
+			final Errors errors,
+			final List<Pair<OutputKey, List<ExpectedValue>>> expectedOutputs,
+			final List<Pair<OutputKey, Writable>> outputs) {
+		if (0 == expectedOutputs.size())
+			return;
+		for (Pair<OutputKey, List<ExpectedValue>> expected : expectedOutputs){
+			String expectedKey = getExpectedKey(expected);
+			ArrayList<Pair<OutputKey, Writable>> matchingRows = getMatchingActual(expectedKey, outputs);
+			if (0 == matchingRows.size())
+				errors.record("Missing expected rowkey (%s).", expectedKey);
+			else
+				checkForExpectedColumns(errors, expected, matchingRows);
+		}
+	}
+	
+	private void checkForExpectedColumns(
+			final Errors errors,
+			Pair<OutputKey, List<ExpectedValue>> expectedRow,
+			ArrayList<Pair<OutputKey, Writable>> matchingRows) {
+		for(ExpectedValue expected : expectedRow.getSecond()){
+			Put match = null;
+			for(Pair<OutputKey,Writable> actualRow : matchingRows){
+				Put actual = (Put)actualRow.getSecond();
+				if (actual.has(expected.getColumnFamily(), expected.getQualifier())) {
+					match = actual;
+					break;
+				}
+			}
+			if (match == null)
+				errors.record(	"Missing expected column (%s:%s).", 
+								Bytes.toString(expected.getColumnFamily()),
+								Bytes.toString(expected.getQualifier()));
+		}
+		
+		
+		
+//		ArrayList<Put> matchingColumns = new ArrayList<Put>();
+//		
+//		for (Pair<OutputKey, Writable> actual : matchingRows){
+//			Put column = (Put) actual.getSecond();
+//			matchingColumns.add(column);
+//		}
+	}
+
+	private ArrayList<Pair<OutputKey, Writable>> getMatchingActual(
+			String expectedKey, List<Pair<OutputKey, Writable>> outputs) {
+		ArrayList<Pair<OutputKey, Writable>> matchingRows = new ArrayList<Pair<OutputKey, Writable>>();
+		for(Pair<OutputKey, Writable> actual : outputs){
+			String actualKey = getActualKey(actual);
+			if (expectedKey.equals(actualKey))
+				matchingRows.add(actual);
+		}
+		return matchingRows;
+	}
+
+	private void checkForUnexpected(
+			final Errors errors,
+			final List<Pair<OutputKey, List<ExpectedValue>>> expectedOutputs,
+			final List<Pair<OutputKey, Writable>> outputs) {
+		if (0 == outputs.size())
+			return;
+		for(Pair<OutputKey, Writable> actual : outputs){
+			String actualKey = getActualKey(actual);
+			ArrayList<Pair<OutputKey, List<ExpectedValue>>> matchingRows = getMatchingExpectedRows(actualKey, expectedOutputs);
+			if (0 == matchingRows.size())
+				errors.record("Recieved unexpected rowkey (%s).", actualKey);
+			else
+				checkForUnexpectedColumns(errors, actual, matchingRows);
+		}
+	}
+	
+	private void checkForUnexpectedColumns(Errors errors,
+			Pair<OutputKey, Writable> actual,
+			ArrayList<Pair<OutputKey, List<ExpectedValue>>> matchingRows) {
+		Put actualColumn = (Put)actual.getSecond();
+		ExpectedValue match = null;
+		for(Pair<OutputKey, List<ExpectedValue>> expectedRow : matchingRows){
+			for(ExpectedValue expectedColumn : expectedRow.getSecond()) {
+				if (actualColumn.has(expectedColumn.getColumnFamily(), expectedColumn.getQualifier())){
+					match = expectedColumn; 
+					break;//more needed here later
+				}
+			}
+		}
+		if (match == null){
+			Collection<List<KeyValue>> columns = actualColumn.getFamilyMap().values();
+			for(List<KeyValue> columnList : columns){
+				for(KeyValue column : columnList) {
+					errors.record(	"Recieved unexpected column (%s:%s).", 
+									Bytes.toString(column.getFamily()), 
+									Bytes.toString(column.getQualifier()));
+				}
+			}
+		}
+	}
+
+	private ArrayList<Pair<OutputKey, List<ExpectedValue>>> getMatchingExpectedRows(
+			String actualKey,
+			List<Pair<OutputKey, List<ExpectedValue>>> expectedRows) {
+		ArrayList<Pair<OutputKey, List<ExpectedValue>>> matchingRows = new ArrayList<Pair<OutputKey, List<ExpectedValue>>>();
+		for(Pair<OutputKey, List<ExpectedValue>> expected : expectedRows){
+			String expectedKey = getExpectedKey(expected);
+			if (actualKey.equals(expectedKey))
+				matchingRows.add(expected);
+		}
+		return matchingRows;
 	}
 
 	private void compareRecordCounts(
 			final Errors errors,
-			final List<Pair<OutputKey, List<ExpectedValue>>> expectedResults,
-			final List<Pair<OutputKey, Writable>> actuals) {
-		if(expectedResults.size() != actuals.size()) {
-			 errors.record("Mismatch in output size.  Expected %s got %s", expectedResults.size(), actuals.size());
-		}
+			final List<Pair<OutputKey, List<ExpectedValue>>> expectedOutputs,
+			final List<Pair<OutputKey, Writable>> outputs) {
+	    if (!outputs.isEmpty()) 
+	        if (expectedOutputs.isEmpty()) 
+	          errors.record("Expected no output(s); got %d output(s).", outputs.size());
+//		if(expectedOutputs.size() != outputs.size()) {
+//			 errors.record("Mismatch in output size.  Expected %s got %s", expectedOutputs.size(), outputs.size());
+//		}
 	}
 
 	private void compareValues(final Errors errors,
