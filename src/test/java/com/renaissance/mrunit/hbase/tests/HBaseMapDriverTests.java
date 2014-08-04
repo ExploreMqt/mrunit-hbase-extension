@@ -126,6 +126,21 @@ public class HBaseMapDriverTests {
 		}
 		assertEquals("1 Error(s): (Missing expected column (t:new pond).)", message);
 	}
+
+	@Test
+	public void expectedValueDoesNotMatchActual() throws IOException {
+		String message = null;
+		try{
+			HBaseExpectedColumn oldPond = new HBaseExpectedColumn(TITLE_COLUMNFAMILY, "old pond");
+			driver.withInput(new LongWritable(0L), new Text("Basho\nold pond\nold pond...\na frog leaps in\nwater's sound"))
+					.withOutput(new ImmutableBytesWritable(Bytes.toBytes("Basho")), oldPond.Value(new Text("old pond...\na frog leaps out\nwater's sound")))
+					.runTest();
+		}
+		catch(AssertionError e){
+			message = e.getMessage();
+		}
+		assertEquals("1 Error(s): (Mismatch value for: Basho(t:new pond)\t\tExpected: old pond...\na frog leaps out\nwater's sound\t\tRecieved: old pond...\na frog leaps in\nwater's sound)", message);
+	}
 	
 
 @Test

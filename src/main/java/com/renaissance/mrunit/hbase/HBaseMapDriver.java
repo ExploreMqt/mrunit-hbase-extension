@@ -90,14 +90,6 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 		compareRecordCounts(errors, expectedOutputs, outputs);
 		checkForExpected(errors, expectedOutputs, outputs);
 		checkForUnexpected(errors, expectedOutputs, outputs);
-//		int i= 0;
-//		for(Pair<OutputKey, List<ExpectedValue>> expected : expectedOutputs){
-//			if (i == outputs.size())
-//				break;
-//			final Pair<OutputKey, Writable> actual = outputs.get(i++);
-//			compareKeys(errors, expected, actual);
-//			compareValues(errors, expected, actual);
-//		}
 		errors.assertNone();
 	}
 	
@@ -109,49 +101,54 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 			return;
 		for (Pair<OutputKey, List<ExpectedValue>> expected : expectedOutputs){
 			String expectedKey = getExpectedKey(expected);
-			ArrayList<Pair<OutputKey, Writable>> matchingRows = getMatchingActual(expectedKey, outputs);
+			ArrayList<Pair<OutputKey, Writable>> matchingRows = getActualRowsWithMatchingRowKey(expectedKey, outputs);
 			if (0 == matchingRows.size())
 				errors.record("Missing expected rowkey (%s).", expectedKey);
 			else
-				checkForExpectedColumns(errors, expected, matchingRows);
+				checkForExpectedColumnsInActual(errors, expected, matchingRows);
 		}
 	}
 	
-	private void checkForExpectedColumns(
+	private void checkForExpectedColumnsInActual(
 			final Errors errors,
 			Pair<OutputKey, List<ExpectedValue>> expectedRow,
 			ArrayList<Pair<OutputKey, Writable>> matchingRows) {
 		for(ExpectedValue expected : expectedRow.getSecond()){
-			Put match = null;
-			for(Pair<OutputKey,Writable> actualRow : matchingRows){
-				Put actual = (Put)actualRow.getSecond();
-				if (actual.has(expected.getColumnFamily(), expected.getQualifier())) {
-					match = actual;
-					break;
-				}
-			}
-			if (match == null)
+			if (expectedNotInActual(errors, matchingRows, expected))
 				errors.record(	"Missing expected column (%s:%s).", 
 								Bytes.toString(expected.getColumnFamily()),
 								Bytes.toString(expected.getQualifier()));
 		}
-		
-		
-		
-//		ArrayList<Put> matchingColumns = new ArrayList<Put>();
-//		
-//		for (Pair<OutputKey, Writable> actual : matchingRows){
-//			Put column = (Put) actual.getSecond();
-//			matchingColumns.add(column);
-//		}
 	}
 
-	private ArrayList<Pair<OutputKey, Writable>> getMatchingActual(
+	private boolean expectedNotInActual(final Errors errors,
+			ArrayList<Pair<OutputKey, Writable>> matchingRows,
+			ExpectedValue expected) {
+		for(Pair<OutputKey,Writable> actualRow : matchingRows){
+			if (expectedColumnInActual(errors, expected, (Put)actualRow.getSecond()))
+				return false;
+		}
+		return true;
+	}
+
+	private boolean expectedColumnInActual(final Errors errors,
+			ExpectedValue expected, Put actual) {
+		if (actual.has(expected.getColumnFamily(), expected.getQualifier())) {
+			String actualValue = getActualValue(actual, expected);
+			if (false == expected.getExpected().equals(actualValue))
+				errors.record(	"Mismatch value for: Basho(t:new pond)\t\tExpected: %s\t\tRecieved: %s",
+								expected.getExpected(),
+								actualValue);
+			return true;
+		}
+		return false;
+	}
+
+	private ArrayList<Pair<OutputKey, Writable>> getActualRowsWithMatchingRowKey(
 			String expectedKey, List<Pair<OutputKey, Writable>> outputs) {
 		ArrayList<Pair<OutputKey, Writable>> matchingRows = new ArrayList<Pair<OutputKey, Writable>>();
 		for(Pair<OutputKey, Writable> actual : outputs){
-			String actualKey = getActualKey(actual);
-			if (expectedKey.equals(actualKey))
+			if (expectedKey.equals(getActualKey(actual)))
 				matchingRows.add(actual);
 		}
 		return matchingRows;
@@ -217,40 +214,10 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 	    if (!outputs.isEmpty()) 
 	        if (expectedOutputs.isEmpty()) 
 	          errors.record("Expected no output(s); got %d output(s).", outputs.size());
-//		if(expectedOutputs.size() != outputs.size()) {
-//			 errors.record("Mismatch in output size.  Expected %s got %s", expectedOutputs.size(), outputs.size());
-//		}
-	}
-
-	private void compareValues(final Errors errors,
-			Pair<OutputKey, List<ExpectedValue>> expected,
-			final Pair<OutputKey, Writable> actual) {
-		Put writable = (Put)actual.getSecond();
-		for(ExpectedValue expectedColumn : expected.getSecond()){
-			try
-			{
-				String actualValue = getActualValue(writable, expectedColumn);
-				if (!expectedColumn.getExpected().equals(actualValue))
-					errors.record("Mapper value does not match expected result.  Expected '%s' got '%s'", expectedColumn.getExpected(), actualValue);
-			}
-			catch (IndexOutOfBoundsException e){
-				errors.record("Could not find a column for %s:%s", new String(expectedColumn.getColumnFamily()), new String(expectedColumn.getQualifier()));
-			}
-		}
 	}
 
 	private String getActualValue(Put writable, ExpectedValue expectedColumn) {
 		return Bytes.toString(writable.get(expectedColumn.getColumnFamily(), expectedColumn.getQualifier()).get(0).getValue());
-	}
-
-	private void compareKeys(final Errors errors,
-			Pair<OutputKey, List<ExpectedValue>> expected,
-			final Pair<OutputKey, Writable> actual) {
-		String expectedKey = getExpectedKey(expected);
-		String actualKey = getActualKey(actual);
-		if(!expectedKey.endsWith(actualKey))
-			errors.record("Mapper key does not match expected result.  "
-					+ "Expected '%s' got '%s'", expectedKey, actualKey);
 	}
 
 	private String getActualKey(final Pair<OutputKey, Writable> actual) {
