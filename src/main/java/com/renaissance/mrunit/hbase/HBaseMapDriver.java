@@ -125,12 +125,20 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 			ArrayList<Pair<OutputKey, Writable>> matchingRows,
 			ExpectedValue expected) {
 		for(Pair<OutputKey,Writable> actualRow : matchingRows){
-			if (expectedColumnInActual(errors, expected, (Put)actualRow.getSecond()))
+			if (expectedColumnInActual(errors, expected, actualRow.getSecond()))
 				return false;
 		}
 		return true;
 	}
 
+	private boolean expectedColumnInActual(final Errors errors,
+			ExpectedValue expected, Writable actual) {
+		if (actual instanceof Put)
+			return expectedColumnInActual(errors, expected, (Put)actual);
+		//TODO: Add a case for KeyValue.
+		return false;
+	}
+	
 	private boolean expectedColumnInActual(final Errors errors,
 			ExpectedValue expected, Put actual) {
 		if (actual.has(expected.getColumnFamily(), expected.getQualifier())) {
