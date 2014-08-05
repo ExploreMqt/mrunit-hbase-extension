@@ -182,30 +182,41 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 			Pair<OutputKey, Writable> actual,
 			ArrayList<Pair<OutputKey, List<ExpectedValue>>> matchingRows) {
 		Put actualColumn = (Put)actual.getSecond();
-		ExpectedValue match = null;
-		for(Pair<OutputKey, List<ExpectedValue>> expectedRow : matchingRows){
-			for(ExpectedValue expectedColumn : expectedRow.getSecond()) {
-				if (actualColumn.has(expectedColumn.getColumnFamily(), expectedColumn.getQualifier())){
-					match = expectedColumn; 
-					break;//more needed here later
-				}
-			}
-		}
-		if (match == null){
-			Collection<List<KeyValue>> columns = actualColumn.getFamilyMap().values();
-			for(List<KeyValue> columnList : columns){
-				for(KeyValue column : columnList) {
-					errors.record(	"Recieved unexpected column (%s:%s).", 
-									Bytes.toString(column.getFamily()), 
-									Bytes.toString(column.getQualifier()));
-				}
-			}
-		}
+		if (false == expectedRowsContainsActual(matchingRows, actualColumn))
+			recordUnexpectedColumns(errors, actualColumn);
+	}
+
+	private boolean expectedRowsContainsActual(
+			ArrayList<Pair<OutputKey, List<ExpectedValue>>> matchingRows,
+			Put actualColumn) {
+		//.net trueForAll() with predicate...
+		for(Pair<OutputKey, List<ExpectedValue>> expectedRow : matchingRows)
+			if (expectedColulmnsContainsActual(actualColumn, expectedRow))
+				return true;
+		return false;
+	}
+
+	private boolean expectedColulmnsContainsActual(Put actualColumn,
+			Pair<OutputKey, List<ExpectedValue>> expectedRow) {
+		//.net trueForAll() with a predicate...
+		for(ExpectedValue expectedColumn : expectedRow.getSecond())
+			if (actualColumn.has(expectedColumn.getColumnFamily(), expectedColumn.getQualifier()))
+				return true;
+		return false;
+	}
+
+	private void recordUnexpectedColumns(Errors errors, Put actualColumn) {
+		for(List<KeyValue> columnList : actualColumn.getFamilyMap().values())
+			for(KeyValue column : columnList)
+				errors.record(	"Recieved unexpected column (%s:%s).", 
+								Bytes.toString(column.getFamily()), 
+								Bytes.toString(column.getQualifier()));
 	}
 
 	private ArrayList<Pair<OutputKey, List<ExpectedValue>>> getMatchingExpectedRows(
 			String actualKey,
 			List<Pair<OutputKey, List<ExpectedValue>>> expectedRows) {
+		//Still a .Net boy at heart. This would be a List<T>.Find() and not a whole method... sigh
 		ArrayList<Pair<OutputKey, List<ExpectedValue>>> matchingRows = new ArrayList<Pair<OutputKey, List<ExpectedValue>>>();
 		for(Pair<OutputKey, List<ExpectedValue>> expected : expectedRows){
 			String expectedKey = getExpectedKey(expected);
@@ -219,9 +230,8 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 			final Errors errors,
 			final List<Pair<OutputKey, List<ExpectedValue>>> expectedOutputs,
 			final List<Pair<OutputKey, Writable>> outputs) {
-	    if (!outputs.isEmpty()) 
-	        if (expectedOutputs.isEmpty()) 
-	          errors.record("Expected no output(s); got %d output(s).", outputs.size());
+	    if (!outputs.isEmpty() && expectedOutputs.isEmpty()) 
+	    	errors.record("Expected no output(s); got %d output(s).", outputs.size());
 	}
 
 	private String getActualValue(Put writable, ExpectedValue expectedColumn) {
@@ -229,16 +239,17 @@ public class HBaseMapDriver<InputKey, InputValue, OutputKey> {
 	}
 
 	private String getActualKey(final Pair<OutputKey, Writable> actual) {
-		String actualKey = actual.getFirst().toString();
-		if (actual.getFirst() instanceof ImmutableBytesWritable)
-			actualKey = Bytes.toString(((ImmutableBytesWritable)actual.getFirst()).get());
-		return actualKey;
+		return getKeyAsString(actual.getFirst());
 	}
 
 	private String getExpectedKey(Pair<OutputKey, List<ExpectedValue>> expected) {
-		String expectedKey = expected.getFirst().toString();
-		if (expected.getFirst() instanceof ImmutableBytesWritable)
-			expectedKey = Bytes.toString(((ImmutableBytesWritable)expected.getFirst()).get());
-		return expectedKey;
+		return getKeyAsString(expected.getFirst());
+	}
+	
+	private String getKeyAsString(OutputKey key){
+		String result = key.toString();
+		if (key instanceof ImmutableBytesWritable)
+			result = Bytes.toString(((ImmutableBytesWritable)key).get());
+		return result;
 	}
 }
